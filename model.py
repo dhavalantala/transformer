@@ -37,23 +37,23 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        x = x + (self.pe[:, :x.shape[1], :]).requires_grad(False)
+        x = x + (self.pe[:, :x.shape[1], :]).requires_grad_(False)
         return self.dropout(x)
     
 
 class LayerNormalization(nn.Module):
 
-    def __init__(self, esp:float = 10 ** -6) -> None:
+    def __init__(self, features: int, eps:float=10**-6) -> None:
         super().__init__()
-        self.esp = esp
-        self.alpha = nn.Parameter(torch.ones(1)) # Multiplied
-        self.bias  = nn.Parameter(torch.zeros(0)) # Added
+        self.eps = eps
+        self.alpha = nn.Parameter(torch.ones(features)) # alpha is a learnable parameter
+        self.bias = nn.Parameter(torch.zeros(features)) # bias is a learnable parameter
 
     def forward(self, x):
-        mean = x.mean(dim = -1, keepdim = True)
-        std = x.std(dim = -1, keepdim = True)
-
-        return self.alpha * (x - mean) / (std + self.esp) + self.bias
+        mean = x.mean(dim = -1, keepdim = True) # (batch, seq_len, 1)
+        std = x.std(dim = -1, keepdim = True) # (batch, seq_len, 1)
+        return self.alpha * (x - mean) / (std + self.eps) + self.bias
+    
     
 class FeedForwardBlock(nn.Module):
 
@@ -123,7 +123,7 @@ class MultiHeadAttentionBlock(nn.Module):
         x, self.attention_scores = MultiHeadAttentionBlock.attention(query, key, value, mask, self.dropout)
 
         ## combine all the heads together
-        x = x.transpose(1,2).contiguous().view(x.sjape[0], -1, self.h * self.d_k)
+        x = x.transpose(1,2).contiguous().view(x.shape[0], -1, self.h * self.d_k)
 
         ## Multiply by Wo
         return self.w_o(x)
@@ -150,7 +150,7 @@ class Encoder(nn.Module):
     def forward(self, x, mask):
         for layer in self.layers:
             x = layer(x, mask)
-        return self.norm
+        return self.norm(x)
     
 class DecoderBlock(nn.Module):
     def __init__(self, features: int, self_attention_block: MultiHeadAttentionBlock, cross_attention_block: MultiHeadAttentionBlock, feed_forward_block: FeedForwardBlock, dropout: float) -> None:
@@ -235,7 +235,7 @@ def build_transformer(src_vocab_size : int, tgt_vocab_size : int, src_seq_len : 
         decoder_self_attention_block = MultiHeadAttentionBlock(d_model, h, dropout)
         decoder_cross_attention_block = MultiHeadAttentionBlock(d_model, h, dropout)
         feed_forward_block = FeedForwardBlock(d_model, d_ff, dropout)
-        decoder_block = DecoderBlock((d_model, decoder_self_attention_block, decoder_cross_attention_block, feed_forward_block, dropout))
+        decoder_block = DecoderBlock(d_model, decoder_self_attention_block, decoder_cross_attention_block, feed_forward_block, dropout)
         decoder_blocks.append(decoder_block)
 
     encoder = Encoder(d_model, nn.ModuleList(encoder_blocks))
